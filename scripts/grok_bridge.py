@@ -22,9 +22,9 @@ from socketserver import ThreadingMixIn
 GROK_URL='https://grok.com'
 VERSION='v1'
 # 多种输入框选择器（grok.com 可能更新 UI）
-INPUT_SELECTORS=['textarea','div[contenteditable="true"]','[data-testid="text-input"]','[role="textbox"]']
+INPUT_SELECTORS=['div[contenteditable="true"]','textarea','[data-testid="text-input"]','[role="textbox"]']
 # 发送按钮选择器
-SEND_SELECTORS=['button[aria-label="Send"]','button[data-testid="send-button"]']
+SEND_SELECTORS=['button[aria-label="Submit"]','button[aria-label="Send"]','button[data-testid="send-button"]']
 
 class GrokBridge:
     def __init__(s):s.lock=threading.Lock()
@@ -71,6 +71,7 @@ class GrokBridge:
             if(el.tagName==='TEXTAREA'){{el.value='';}}
             else{{el.textContent='';}}
             document.execCommand('insertText',false,'{safe}');
+            el.dispatchEvent(new Event('input',{{bubbles:true}}));
             return'OK';
         }})()""")
         time.sleep(0.5)
