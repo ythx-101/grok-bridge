@@ -163,7 +163,9 @@ class H(BaseHTTPRequestHandler):
             try:s._j(200,b.history())
             except Exception as e:s._j(500,{'error':str(e),'status':'error'})
         else:s.send_response(404);s.end_headers()
-    def _j(s,c,d):s.send_response(c);s.send_header('Content-Type','application/json');s.end_headers();s.wfile.write(json.dumps(d,ensure_ascii=False).encode())
+    def _j(s,c,d):
+        body=json.dumps(d,ensure_ascii=False).encode()
+        s.send_response(c);s.send_header('Content-Type','application/json');s.send_header('Content-Length',str(len(body)));s.end_headers();s.wfile.write(body)
     def log_message(s,*a):pass
 
 class ThreadedHTTPServer(ThreadingMixIn,HTTPServer):daemon_threads=True
