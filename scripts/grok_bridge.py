@@ -22,9 +22,9 @@ from socketserver import ThreadingMixIn
 GROK_URL='https://grok.com'
 VERSION='v1'
 # 多种输入框选择器（grok.com 可能更新 UI）
-INPUT_SELECTORS=['textarea','div[contenteditable="true"]','[data-testid="text-input"]','[role="textbox"]']
+INPUT_SELECTORS=['div[contenteditable="true"]','textarea','[data-testid="text-input"]','[role="textbox"]']
 # 发送按钮选择器
-SEND_SELECTORS=['button[aria-label="Send"]','button[data-testid="send-button"]']
+SEND_SELECTORS=['button[aria-label="Submit"]','button[aria-label="Send"]','button[data-testid="send-button"]']
 
 class GrokBridge:
     def __init__(s):s.lock=threading.Lock()
@@ -71,6 +71,7 @@ class GrokBridge:
             if(el.tagName==='TEXTAREA'){{el.value='';}}
             else{{el.textContent='';}}
             document.execCommand('insertText',false,'{safe}');
+            el.dispatchEvent(new Event('input',{{bubbles:true}}));
             return'OK';
         }})()""")
         time.sleep(0.5)
@@ -162,7 +163,9 @@ class H(BaseHTTPRequestHandler):
             try:s._j(200,b.history())
             except Exception as e:s._j(500,{'error':str(e),'status':'error'})
         else:s.send_response(404);s.end_headers()
-    def _j(s,c,d):s.send_response(c);s.send_header('Content-Type','application/json');s.end_headers();s.wfile.write(json.dumps(d,ensure_ascii=False).encode())
+    def _j(s,c,d):
+        body=json.dumps(d,ensure_ascii=False).encode()
+        s.send_response(c);s.send_header('Content-Type','application/json');s.send_header('Content-Length',str(len(body)));s.end_headers();s.wfile.write(body)
     def log_message(s,*a):pass
 
 class ThreadedHTTPServer(ThreadingMixIn,HTTPServer):daemon_threads=True
