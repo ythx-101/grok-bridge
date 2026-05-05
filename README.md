@@ -36,6 +36,11 @@ curl http://your-mac:19998/history
 python3 scripts/grok_bridge.py chat "Explain quantum tunneling"
 python3 scripts/grok_bridge.py chat "Write a haiku" --server http://your-mac:19998
 
+# Agent-friendly modes
+git diff | python3 scripts/grok_bridge.py chat --stdin --json
+python3 scripts/grok_bridge.py chat "Summarize this fresh thread" --new
+python3 scripts/grok_bridge.py health --json
+
 # Local
 bash scripts/grok_chat.sh "Explain quantum tunneling"
 
@@ -58,7 +63,15 @@ MAC_SSH="ssh user@your-mac" bash scripts/grok_chat.sh "Write a haiku" --timeout 
 | POST | `/chat` | Send prompt, wait for response |
 | POST | `/new` | Start new conversation |
 | GET | `/health` | Health check (Safari URL, grok status) |
+| GET | `/version` | Bridge version |
+| GET | `/capabilities` | API and CLI capability metadata |
 | GET | `/history` | Read current page conversation |
+
+## Agent usage ideas
+
+- Failing-test debugger loop: send tracebacks and focused source snippets, ask for the smallest fix, apply locally, rerun.
+- Doc/changelog sync: send `git diff`, ask for concise docstrings, release notes, or migration notes.
+- Spike helper: send a parser/API/state-machine constraint, ask Grok for two implementation options, then benchmark locally.
 
 ## Version History
 
