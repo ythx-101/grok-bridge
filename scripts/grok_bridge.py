@@ -46,10 +46,13 @@ def print_response(response):
     """ 简单美观输出 """
     if response.get('status') == 'ok':
         print(response.get('response', ''))
+        return 0
     elif response.get('status') == 'timeout':
         print(f"[Timeout] {response.get('response', '')}")
+        return 1
     else:
         print(f"[Error] {response.get('error', 'Unknown error')}")
+        return 1
 
 
 # ==================== 服务端核心逻辑 ====================
@@ -150,6 +153,8 @@ class GrokBridge:
             i = text.rfind(m)
             if i > 0:
                 text = text[:i]
+        text = re.sub(r'(?m)^Thought for [0-9]+(\.[0-9]+)?s\s*$', '', text)
+        text = re.sub(r'\n+[0-9]+(\.[0-9]+)?\s*(ms|s)\s*(\n.*)?$', '', text, flags=re.S)
         text = re.sub(r'\n[0-9]+(\.[0-9]+)?s\n', '\n', text)
         text = re.sub(r'\n(Share|Compare|Make it|Explain|Toggle|Like|Dislike).*', '', text)
         text = re.sub(r'\n{3,}', '\n\n', text)
@@ -277,21 +282,25 @@ def run_chat(prompt, server_url, timeout):
     import urllib.request
     import urllib.error
 
+    server_url = server_url.rstrip('/')
     data = json.dumps({'prompt': prompt, 'timeout': timeout}).encode('utf-8')
     req = urllib.request.Request(f'{server_url}/chat', data=data, headers={'Content-Type': 'application/json'})
     try:
         with urllib.request.urlopen(req, timeout=timeout + 10) as response:
             result = json.loads(response.read().decode('utf-8'))
-            print_response(result)
+            return print_response(result)
     except urllib.error.URLError as e:
-        print(f"[Error] 无法连接到 server: {server_url} ({e})")
+        print(f"[Error] 无法连接到 server: {server_url} ({e})", file=sys.stderr)
+        return 1
     except Exception as e:
-        print(f"[Error] {e}")
+        print(f"[Error] {e}", file=sys.stderr)
+        return 1
 
 
 def main():
     parser = argparse.ArgumentParser(description='Grok Bridge - Safari 自动化 Grok CLI')
-    subparsers = parser.add_subparsers(dest='command', required=True)
+    parser.add_argument('--port', type=int, default=19998, help='Legacy server port')
+    subparsers = parser.add_subparsers(dest='command')
 
     # server 子命令
     server_parser = subparsers.add_parser('server', help='Start the REST API server')
@@ -305,14 +314,19 @@ def main():
 
     args = parser.parse_args()
 
+    if args.command is None:
+        return run_server(args.port)
+
     if args.command == 'server':
-        run_server(args.port)
+        return run_server(args.port)
 
     elif args.command == 'chat':
         config = load_config()
         server_url = args.server or config['server']
-        run_chat(args.prompt, server_url, args.timeout)
+        return run_chat(args.prompt, server_url, args.timeout)
+
+    return 2
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

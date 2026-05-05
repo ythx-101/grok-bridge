@@ -13,6 +13,9 @@ Two modes:
 ### REST API (recommended)
 ```bash
 # Start the server on your Mac
+python3 scripts/grok_bridge.py server --port 19998
+
+# Legacy server mode still works
 python3 scripts/grok_bridge.py --port 19998
 
 # Query from anywhere
@@ -27,8 +30,12 @@ curl http://your-mac:19998/health
 curl http://your-mac:19998/history
 ```
 
-### CLI (legacy)
+### CLI
 ```bash
+# One-shot via a running grok-bridge server
+python3 scripts/grok_bridge.py chat "Explain quantum tunneling"
+python3 scripts/grok_bridge.py chat "Write a haiku" --server http://your-mac:19998
+
 # Local
 bash scripts/grok_chat.sh "Explain quantum tunneling"
 
