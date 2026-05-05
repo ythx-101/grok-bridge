@@ -40,6 +40,13 @@ python3 scripts/grok_bridge.py chat "Write a haiku" --server http://your-mac:199
 git diff | python3 scripts/grok_bridge.py chat --stdin --json
 python3 scripts/grok_bridge.py chat "Summarize this fresh thread" --new
 python3 scripts/grok_bridge.py health --json
+python3 scripts/grok_bridge.py state --json
+python3 scripts/grok_bridge.py model
+python3 scripts/grok_bridge.py model "Grok 4.3"
+python3 scripts/grok_bridge.py mode Imagine
+python3 scripts/grok_bridge.py imagine "A clean terminal UI for AI agents" --json
+python3 scripts/grok_bridge.py images --json
+python3 scripts/grok_bridge.py project "My Project"
 
 # Local
 bash scripts/grok_chat.sh "Explain quantum tunneling"
@@ -63,9 +70,28 @@ MAC_SSH="ssh user@your-mac" bash scripts/grok_chat.sh "Write a haiku" --timeout 
 | POST | `/chat` | Send prompt, wait for response |
 | POST | `/new` | Start new conversation |
 | GET | `/health` | Health check (Safari URL, grok status) |
+| GET | `/state` | Health + active model + tab mode |
+| GET | `/model` | Current model label |
+| GET | `/images` | Visible image URLs from the bridge tab |
 | GET | `/version` | Bridge version |
 | GET | `/capabilities` | API and CLI capability metadata |
 | GET | `/history` | Read current page conversation |
+| POST | `/model` | Switch model by visible label (experimental) |
+| POST | `/mode` | Navigate visible mode, such as Chat or Imagine (experimental) |
+| POST | `/project` | Open visible project/sidebar item by name (experimental) |
+| POST | `/imagine` | Generate through Grok Imagine and return visible image URLs (experimental) |
+
+## Browser/session behavior
+
+By default the server uses a dedicated Safari tab marked with
+`window.name = "grok-bridge-agent"`. This lets agents reuse one Grok thread
+without repeatedly creating fresh sessions, and avoids activating Safari during
+normal chat calls. If you want the old behavior for debugging, start the server
+with `--shared-tab`.
+
+UI-mutating calls are serialized through one bridge lock. Agents should still
+avoid running `chat`, `model`, `mode`, `project`, or `imagine` calls in parallel
+against the same server because they operate on one browser tab.
 
 ## Agent usage ideas
 

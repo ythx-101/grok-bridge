@@ -29,17 +29,20 @@ from socketserver import ThreadingMixIn
 
 GROK_URL = 'https://grok.com'
 VERSION = 'v1-cli'
+BRIDGE_TAB_NAME = 'grok-bridge-agent'
 
 CAPABILITIES = {
     'api': {
-        'GET': ['/health', '/history', '/version', '/capabilities'],
-        'POST': ['/chat', '/new']
+        'GET': ['/health', '/history', '/version', '/capabilities', '/state', '/model', '/images'],
+        'POST': ['/chat', '/new', '/model', '/mode', '/project', '/imagine']
     },
     'cli': {
-        'commands': ['server', 'chat', 'health', 'new'],
-        'chat_flags': ['--server', '--timeout', '--json', '--stdin', '--new']
+        'commands': ['server', 'chat', 'health', 'new', 'state', 'model', 'mode', 'project', 'imagine', 'images'],
+        'chat_flags': ['--server', '--timeout', '--json', '--stdin', '--new'],
+        'server_flags': ['--port', '--shared-tab']
     },
-    'constraints': ['macOS', 'Safari', 'grok.com login', 'Safari JavaScript from Apple Events']
+    'constraints': ['macOS', 'Safari', 'grok.com login', 'Safari JavaScript from Apple Events'],
+    'experimental': ['model switching', 'mode navigation', 'project navigation', 'image generation via Imagine']
 }
 
 # ==================== 配置与工具函数 ====================
@@ -65,6 +68,8 @@ def print_response(response, json_output=False):
         return 0 if response.get('status') == 'ok' else 1
     if response.get('status') == 'ok':
         print(response.get('response', ''))
+        for image in response.get('images') or []:
+            print(image.get('src', ''))
         return 0
     elif response.get('status') == 'timeout':
         print(f"[Timeout] {response.get('response', '')}")
@@ -94,8 +99,10 @@ SEND_SELECTORS = [
 
 
 class GrokBridge:
-    def __init__(s):
+    def __init__(s, dedicated=True, tab_name=BRIDGE_TAB_NAME):
         s.lock = threading.Lock()
+        s.dedicated = dedicated
+        s.tab_name = tab_name
 
     def _osa(self, script, timeout=30):
         r = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=timeout)
@@ -105,15 +112,41 @@ class GrokBridge:
 
     def _js(self, js, timeout=30):
         esc = js.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
-        return self._osa(f'tell application "Safari" to do JavaScript "{esc}" in current tab of front window', timeout)
+        if not self.dedicated:
+            return self._osa(f'tell application "Safari" to do JavaScript "{esc}" in current tab of front window', timeout)
+        marker = self.tab_name.replace('\\', '\\\\').replace('"', '\\"')
+        script = f'''
+tell application "Safari"
+    if (count of windows) = 0 then
+        make new document with properties {{URL:"{GROK_URL}"}}
+        delay 4
+        do JavaScript "window.name=\\"{marker}\\"" in current tab of front window
+    end if
+    repeat with w in windows
+        repeat with t in tabs of w
+            try
+                if (do JavaScript "window.name" in t) is "{marker}" then
+                    return do JavaScript "{esc}" in t
+                end if
+            end try
+        end repeat
+    end repeat
+    set targetWindow to front window
+    set targetTab to make new tab at end of tabs of targetWindow with properties {{URL:"{GROK_URL}"}}
+    delay 4
+    do JavaScript "window.name=\\"{marker}\\"" in targetTab
+    return do JavaScript "{esc}" in targetTab
+end tell
+'''
+        return self._osa(script, timeout)
 
     def _ensure_grok(self):
         try:
-            url = self._osa('tell application "Safari" to get URL of current tab of front window')
+            url = self._js('location.href')
         except:
             url = ''
         if 'grok.com' not in url:
-            self._osa(f'tell application "Safari" to set URL of current tab of front window to "{GROK_URL}"')
+            self._js(f'location.href={json.dumps(GROK_URL)}')
             time.sleep(4)
 
     def _find_input(self):
@@ -140,9 +173,6 @@ class GrokBridge:
         return None
 
     def _type_and_send(self, text, input_sel):
-        self._osa('tell application "Safari" to activate')
-        time.sleep(0.3)
-
         selector = json.dumps(input_sel)
         payload = json.dumps(text, ensure_ascii=False)
         self._js(f"""(() => {{
@@ -207,6 +237,43 @@ class GrokBridge:
             const el = nodes[nodes.length - 1];
             return el ? el.innerText : '';
         })()""", timeout=15)
+
+    def _get_images(self):
+        try:
+            raw = self._js("""(() => {
+                const seen = new Set();
+                return JSON.stringify([...document.images]
+                .filter(img => {
+                    const style = window.getComputedStyle(img);
+                    return img.src && style.display !== 'none' && style.visibility !== 'hidden' && img.getClientRects().length > 0;
+                })
+                .map(img => {
+                    const src = img.currentSrc || img.src || '';
+                    const isData = src.startsWith('data:');
+                    return {
+                        src: isData ? src.slice(0, 80) + '...' : src,
+                        data_uri: isData,
+                        alt: img.alt || '',
+                        width: img.naturalWidth || img.width,
+                        height: img.naturalHeight || img.height
+                    };
+                })
+                .filter(img => {
+                    const alt = (img.alt || '').toLowerCase();
+                    const src = img.src || '';
+                    if (alt === 'pfp' || alt.includes('company logo') || alt.includes('powered by')) return false;
+                    if (src.includes('cookielaw.org')) return false;
+                    const key = img.src + '|' + img.alt + '|' + img.width + 'x' + img.height;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                })
+                .filter(x => x.width >= 128 || x.height >= 128)
+                .slice(-12));
+            })()""", timeout=15)
+            return json.loads(raw)
+        except Exception:
+            return []
 
     def _clean(self, text):
         for m in ['\nAsk anything', '\nDeepSearch', '\nThink Harder', '\nThink\n', '\nAttach', '\nGrok', '\nFast\n', '\nAuto\n', '\nUpgrade to']:
@@ -293,10 +360,117 @@ class GrokBridge:
 
     def health(self):
         try:
-            url = self._osa('tell application "Safari" to get URL of current tab of front window')
-            return {'status': 'ok', 'url': url, 'on_grok': 'grok.com' in url, 'version': VERSION, 'capabilities': CAPABILITIES}
+            url = self._js('location.href')
+            return {'status': 'ok', 'url': url, 'on_grok': 'grok.com' in url, 'version': VERSION, 'dedicated_tab': self.dedicated, 'tab_name': self.tab_name if self.dedicated else None, 'capabilities': CAPABILITIES}
         except:
-            return {'status': 'error', 'error': 'safari not reachable', 'version': VERSION, 'capabilities': CAPABILITIES}
+            return {'status': 'error', 'error': 'safari not reachable', 'version': VERSION, 'dedicated_tab': self.dedicated, 'capabilities': CAPABILITIES}
+
+    def current_model(self):
+        try:
+            model = self._js("""(() => {
+                const b = [...document.querySelectorAll('button')].find(x => (x.getAttribute('aria-label') || '') === 'Model select');
+                return b ? (b.innerText || b.textContent || '').trim() : '';
+            })()""")
+            return {'status': 'ok', 'model': model or None}
+        except Exception as e:
+            return {'status': 'error', 'error': str(e)}
+
+    def set_model(self, model):
+        try:
+            wanted = model.lower()
+            self._js("""(() => {
+                const b = [...document.querySelectorAll('button')].find(x => (x.getAttribute('aria-label') || '') === 'Model select');
+                if (b) b.click();
+                return b ? 'OK' : 'NO_MODEL_BUTTON';
+            })()""")
+            time.sleep(0.8)
+            result = self._js(f"""(() => {{
+                const wanted = {json.dumps(wanted)};
+                const visible = el => {{
+                    if (!el || el.disabled || el.hidden || el.getAttribute('aria-hidden') === 'true') return false;
+                    const style = window.getComputedStyle(el);
+                    return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0;
+                }};
+                const candidates = [...document.querySelectorAll('button,[role="option"],[role="menuitem"],[data-radix-collection-item]')].filter(visible);
+                const hit = candidates.find(el => ((el.innerText || el.textContent || '').trim().toLowerCase()).includes(wanted));
+                if (!hit) return JSON.stringify({{status:'error', error:'model option not found'}});
+                hit.click();
+                return JSON.stringify({{status:'ok'}});
+            }})()""")
+            data = json.loads(result)
+            if data.get('status') != 'ok':
+                return data
+            time.sleep(0.8)
+            current = self.current_model()
+            current['requested'] = model
+            return current
+        except Exception as e:
+            return {'status': 'error', 'error': str(e), 'requested': model}
+
+    def navigate_mode(self, mode):
+        try:
+            mode = mode.strip()
+            result = self._click_text(mode, selector='a,[role="button"],button')
+            if result.get('status') == 'ok':
+                time.sleep(1)
+                result['url'] = self._js('location.href')
+            return result
+        except Exception as e:
+            return {'status': 'error', 'error': str(e), 'target': mode}
+
+    def open_project(self, name):
+        try:
+            result = self._click_text(name, selector='a,[role="button"],button,div')
+            if result.get('status') == 'ok':
+                time.sleep(1)
+                result['url'] = self._js('location.href')
+            return result
+        except Exception as e:
+            return {'status': 'error', 'error': str(e), 'target': name}
+
+    def _click_text(self, text, selector='a,button,[role="button"]'):
+        target = text.strip().lower()
+        result = self._js(f"""(() => {{
+            const target = {json.dumps(target)};
+            const visible = el => {{
+                if (!el || el.disabled || el.hidden || el.getAttribute('aria-hidden') === 'true') return false;
+                const style = window.getComputedStyle(el);
+                return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0;
+            }};
+            const nodes = [...document.querySelectorAll({json.dumps(selector)})].filter(visible);
+            const hit = nodes.find(el => ((el.innerText || el.textContent || el.getAttribute('aria-label') || '').trim().toLowerCase()) === target)
+                || nodes.find(el => ((el.innerText || el.textContent || el.getAttribute('aria-label') || '').trim().toLowerCase()).includes(target));
+            if (!hit) return JSON.stringify({{status:'error', error:'target not found', target}});
+            hit.click();
+            return JSON.stringify({{status:'ok', target, clicked:(hit.innerText || hit.textContent || hit.getAttribute('aria-label') || '').trim()}});
+        }})()""")
+        return json.loads(result)
+
+    def imagine(self, prompt, timeout=180):
+        nav = self.navigate_mode('Imagine')
+        if nav.get('status') != 'ok':
+            return nav
+        before = {img.get('src') for img in self._get_images()}
+        sel = self._wait_ready()
+        if not sel:
+            return {'status': 'error', 'error': 'input not found', 'mode': 'Imagine', 'images': self._get_images()}
+        self._type_and_send(prompt, sel)
+        start = time.time()
+        last_images = []
+        while time.time() - start < timeout:
+            time.sleep(5)
+            images = self._get_images()
+            new_images = [img for img in images if img.get('src') not in before]
+            if new_images:
+                return {'status': 'ok', 'response': '', 'mode': 'Imagine', 'images': new_images, 'elapsed': round(time.time() - start, 1)}
+            last_images = images
+        return {'status': 'timeout', 'response': '', 'mode': 'Imagine', 'images': last_images, 'elapsed': round(time.time() - start, 1)}
+
+    def state(self):
+        h = self.health()
+        if h.get('status') == 'ok':
+            h['model'] = self.current_model().get('model')
+        return h
 
 
 # ==================== HTTP 服务器 ====================
@@ -319,11 +493,41 @@ class H(BaseHTTPRequestHandler):
                 self._j(500, {'error': str(e), 'status': 'error'})
         elif self.path == '/new':
             try:
-                b._osa(f'tell application "Safari" to set URL of current tab of front window to "{GROK_URL}"')
-                time.sleep(3)
+                with b.lock:
+                    b._js(f'location.href={json.dumps(GROK_URL)}')
+                    time.sleep(3)
                 self._j(200, {'status': 'ok'})
             except Exception as e:
                 self._j(500, {'error': str(e), 'status': 'error'})
+        elif self.path == '/model':
+            model = d.get('model', '')
+            if not model:
+                self._j(400, {'status': 'error', 'error': 'model is required'})
+            else:
+                with b.lock:
+                    self._j(200, b.set_model(model))
+        elif self.path == '/mode':
+            mode = d.get('mode', '')
+            if not mode:
+                self._j(400, {'status': 'error', 'error': 'mode is required'})
+            else:
+                with b.lock:
+                    self._j(200, b.navigate_mode(mode))
+        elif self.path == '/project':
+            name = d.get('name', '')
+            if not name:
+                self._j(400, {'status': 'error', 'error': 'name is required'})
+            else:
+                with b.lock:
+                    self._j(200, b.open_project(name))
+        elif self.path == '/imagine':
+            p = d.get('prompt', '')
+            to = d.get('timeout', 180)
+            if not p:
+                self._j(400, {'status': 'error', 'error': 'prompt is required'})
+            else:
+                with b.lock:
+                    self._j(200, b.imagine(p, to))
         else:
             self.send_response(404)
             self.end_headers()
@@ -331,6 +535,12 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/health':
             self._j(200, b.health())
+        elif self.path == '/state':
+            self._j(200, b.state())
+        elif self.path == '/model':
+            self._j(200, b.current_model())
+        elif self.path == '/images':
+            self._j(200, {'status': 'ok', 'images': b._get_images()})
         elif self.path == '/version':
             self._j(200, {'status': 'ok', 'version': VERSION})
         elif self.path == '/capabilities':
@@ -358,11 +568,12 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 
-def run_server(port):
+def run_server(port, dedicated=True):
     global b
-    b = GrokBridge()
+    b = GrokBridge(dedicated=dedicated)
     print(f'Grok Bridge {VERSION} listening on :{port}', flush=True)
-    print('Safari 开发者选项必须开启：允许来自 Apple Events 的 JavaScript', flush=True)
+    mode = f'dedicated tab: {BRIDGE_TAB_NAME}' if dedicated else 'shared current tab'
+    print(f'Safari 开发者选项必须开启：允许来自 Apple Events 的 JavaScript ({mode})', flush=True)
     ThreadedHTTPServer(('0.0.0.0', port), H).serve_forever()
 
 
@@ -418,6 +629,19 @@ def run_health(server_url, json_output=False):
         return 1
 
 
+def run_state(server_url, json_output=False):
+    try:
+        result = get_json(server_url, '/state', 10)
+        if json_output:
+            print(json.dumps(result, ensure_ascii=False))
+        else:
+            print(f"{result.get('status')} version={result.get('version')} model={result.get('model')} dedicated_tab={result.get('dedicated_tab')} url={result.get('url', '')}")
+        return 0 if result.get('status') == 'ok' else 1
+    except Exception as e:
+        print(f"[Error] {e}", file=sys.stderr)
+        return 1
+
+
 def run_new(server_url, json_output=False):
     try:
         result = post_json(server_url, '/new', {}, 15)
@@ -425,6 +649,60 @@ def run_new(server_url, json_output=False):
             print(json.dumps(result, ensure_ascii=False))
         else:
             print(result.get('status', 'unknown'))
+        return 0 if result.get('status') == 'ok' else 1
+    except Exception as e:
+        print(f"[Error] {e}", file=sys.stderr)
+        return 1
+
+
+def run_model(server_url, model=None, json_output=False):
+    try:
+        result = post_json(server_url, '/model', {'model': model}, 30) if model else get_json(server_url, '/model', 10)
+        if json_output:
+            print(json.dumps(result, ensure_ascii=False))
+        elif model:
+            print(f"{result.get('status')} requested={result.get('requested', model)} model={result.get('model')} {result.get('error', '')}".strip())
+        else:
+            print(result.get('model') or result.get('error') or 'unknown')
+        return 0 if result.get('status') == 'ok' else 1
+    except Exception as e:
+        print(f"[Error] {e}", file=sys.stderr)
+        return 1
+
+
+def run_action(server_url, path, payload, json_output=False):
+    try:
+        result = post_json(server_url, path, payload, 30)
+        if json_output:
+            print(json.dumps(result, ensure_ascii=False))
+        else:
+            if result.get('status') == 'ok':
+                print(f"ok {result.get('clicked', result.get('target', ''))} {result.get('url', '')}".strip())
+            else:
+                print(f"[Error] {result.get('error', 'Unknown error')}", file=sys.stderr)
+        return 0 if result.get('status') == 'ok' else 1
+    except Exception as e:
+        print(f"[Error] {e}", file=sys.stderr)
+        return 1
+
+
+def run_imagine(prompt, server_url, timeout, json_output=False):
+    try:
+        result = post_json(server_url, '/imagine', {'prompt': prompt, 'timeout': timeout}, timeout + 120)
+        return print_response(result, json_output)
+    except Exception as e:
+        print(f"[Error] {e}", file=sys.stderr)
+        return 1
+
+
+def run_images(server_url, json_output=False):
+    try:
+        result = get_json(server_url, '/images', 15)
+        if json_output:
+            print(json.dumps(result, ensure_ascii=False))
+        else:
+            for image in result.get('images') or []:
+                print(image.get('src', ''))
         return 0 if result.get('status') == 'ok' else 1
     except Exception as e:
         print(f"[Error] {e}", file=sys.stderr)
@@ -445,6 +723,7 @@ def main(argv=None):
     # server 子命令
     server_parser = subparsers.add_parser('server', help='Start the REST API server')
     server_parser.add_argument('--port', type=int, default=19998, help='Port to listen on')
+    server_parser.add_argument('--shared-tab', action='store_true', help='Use Safari current tab instead of a dedicated background tab')
 
     # chat 子命令
     chat_parser = subparsers.add_parser('chat', help='Send a prompt via CLI (one-shot)')
@@ -460,10 +739,46 @@ def main(argv=None):
     health_parser.add_argument('--server', default=None, help='Server URL (default: http://localhost:19998)')
     health_parser.add_argument('--json', action='store_true', help='Print raw JSON response')
 
+    # state 子命令
+    state_parser = subparsers.add_parser('state', help='Show bridge state including model and tab mode')
+    state_parser.add_argument('--server', default=None, help='Server URL (default: http://localhost:19998)')
+    state_parser.add_argument('--json', action='store_true', help='Print raw JSON response')
+
     # new 子命令
     new_parser = subparsers.add_parser('new', help='Start a new Grok chat')
     new_parser.add_argument('--server', default=None, help='Server URL (default: http://localhost:19998)')
     new_parser.add_argument('--json', action='store_true', help='Print raw JSON response')
+
+    # model 子命令
+    model_parser = subparsers.add_parser('model', help='Show or switch Grok model (experimental)')
+    model_parser.add_argument('model', nargs='?', help='Model text to select, e.g. "Grok 4.3"')
+    model_parser.add_argument('--server', default=None, help='Server URL (default: http://localhost:19998)')
+    model_parser.add_argument('--json', action='store_true', help='Print raw JSON response')
+
+    # mode 子命令
+    mode_parser = subparsers.add_parser('mode', help='Navigate Grok mode, e.g. Chat or Imagine (experimental)')
+    mode_parser.add_argument('mode', help='Mode text to click')
+    mode_parser.add_argument('--server', default=None, help='Server URL (default: http://localhost:19998)')
+    mode_parser.add_argument('--json', action='store_true', help='Print raw JSON response')
+
+    # project 子命令
+    project_parser = subparsers.add_parser('project', help='Open a Grok project/sidebar item by name (experimental)')
+    project_parser.add_argument('name', help='Project text to click')
+    project_parser.add_argument('--server', default=None, help='Server URL (default: http://localhost:19998)')
+    project_parser.add_argument('--json', action='store_true', help='Print raw JSON response')
+
+    # imagine 子命令
+    imagine_parser = subparsers.add_parser('imagine', help='Generate an image through Grok Imagine (experimental)')
+    imagine_parser.add_argument('prompt', nargs='?', help='Image prompt, or - to read stdin')
+    imagine_parser.add_argument('--server', default=None, help='Server URL (default: http://localhost:19998)')
+    imagine_parser.add_argument('--timeout', type=int, default=180, help='Timeout in seconds')
+    imagine_parser.add_argument('--json', action='store_true', help='Print raw JSON response')
+    imagine_parser.add_argument('--stdin', action='store_true', help='Read prompt from stdin')
+
+    # images 子命令
+    images_parser = subparsers.add_parser('images', help='List visible image URLs from the bridge tab')
+    images_parser.add_argument('--server', default=None, help='Server URL (default: http://localhost:19998)')
+    images_parser.add_argument('--json', action='store_true', help='Print raw JSON response')
 
     args = parser.parse_args(argv)
 
@@ -471,7 +786,7 @@ def main(argv=None):
         return run_server(args.port)
 
     if args.command == 'server':
-        return run_server(args.port)
+        return run_server(args.port, dedicated=not args.shared_tab)
 
     elif args.command == 'chat':
         config = load_config()
@@ -486,9 +801,37 @@ def main(argv=None):
         config = load_config()
         return run_health(args.server or config['server'], args.json)
 
+    elif args.command == 'state':
+        config = load_config()
+        return run_state(args.server or config['server'], args.json)
+
     elif args.command == 'new':
         config = load_config()
         return run_new(args.server or config['server'], args.json)
+
+    elif args.command == 'model':
+        config = load_config()
+        return run_model(args.server or config['server'], args.model, args.json)
+
+    elif args.command == 'mode':
+        config = load_config()
+        return run_action(args.server or config['server'], '/mode', {'mode': args.mode}, args.json)
+
+    elif args.command == 'project':
+        config = load_config()
+        return run_action(args.server or config['server'], '/project', {'name': args.name}, args.json)
+
+    elif args.command == 'imagine':
+        config = load_config()
+        prompt = resolve_prompt(args).strip()
+        if not prompt:
+            print('[Error] prompt is required', file=sys.stderr)
+            return 2
+        return run_imagine(prompt, args.server or config['server'], args.timeout, args.json)
+
+    elif args.command == 'images':
+        config = load_config()
+        return run_images(args.server or config['server'], args.json)
 
     return 2
 

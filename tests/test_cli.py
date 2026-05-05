@@ -20,7 +20,13 @@ class MockBridge(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == '/health':
-            self._json({'status': 'ok', 'version': 'test', 'on_grok': True, 'url': 'https://grok.com/'})
+            self._json({'status': 'ok', 'version': 'test', 'on_grok': True, 'url': 'https://grok.com/', 'dedicated_tab': True})
+        elif self.path == '/state':
+            self._json({'status': 'ok', 'version': 'test', 'on_grok': True, 'url': 'https://grok.com/', 'dedicated_tab': True, 'model': 'Grok Test'})
+        elif self.path == '/model':
+            self._json({'status': 'ok', 'model': 'Grok Test'})
+        elif self.path == '/images':
+            self._json({'status': 'ok', 'images': [{'src': 'https://example.com/existing.png'}]})
         else:
             self.send_response(404)
             self.end_headers()
@@ -33,6 +39,14 @@ class MockBridge(BaseHTTPRequestHandler):
             self._json({'status': 'ok', 'response': 'echo:' + MockBridge.last_prompt})
         elif self.path == '/new':
             self._json({'status': 'ok'})
+        elif self.path == '/model':
+            self._json({'status': 'ok', 'requested': payload.get('model'), 'model': payload.get('model')})
+        elif self.path == '/mode':
+            self._json({'status': 'ok', 'target': payload.get('mode'), 'clicked': payload.get('mode')})
+        elif self.path == '/project':
+            self._json({'status': 'ok', 'target': payload.get('name'), 'clicked': payload.get('name')})
+        elif self.path == '/imagine':
+            self._json({'status': 'ok', 'response': 'made image', 'images': [{'src': 'https://example.com/image.png'}]})
         else:
             self.send_response(404)
             self.end_headers()
@@ -91,6 +105,37 @@ class CliTests(unittest.TestCase):
         result = self.run_cli('health', '--server', self.url, '--json')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)['version'], 'test')
+
+    def test_state_json(self):
+        result = self.run_cli('state', '--server', self.url, '--json')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['model'], 'Grok Test')
+
+    def test_model_get_and_set(self):
+        result = self.run_cli('model', '--server', self.url)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Grok Test', result.stdout)
+        result = self.run_cli('model', 'Grok 4.3', '--server', self.url, '--json')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['requested'], 'Grok 4.3')
+
+    def test_mode_and_project(self):
+        result = self.run_cli('mode', 'Imagine', '--server', self.url, '--json')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['clicked'], 'Imagine')
+        result = self.run_cli('project', 'My Project', '--server', self.url, '--json')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['clicked'], 'My Project')
+
+    def test_imagine_json(self):
+        result = self.run_cli('imagine', 'a calm terminal UI', '--server', self.url, '--json')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['images'][0]['src'], 'https://example.com/image.png')
+
+    def test_images_json(self):
+        result = self.run_cli('images', '--server', self.url, '--json')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['images'][0]['src'], 'https://example.com/existing.png')
 
     def test_connection_failure_is_nonzero(self):
         result = self.run_cli('chat', 'hello', '--server', 'http://127.0.0.1:1')
