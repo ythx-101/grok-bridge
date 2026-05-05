@@ -248,7 +248,7 @@ class H(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    def _j(s, c, d):
+    def _j(self, c, d):
         self.send_response(c)
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
