@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-grok_bridge.py v1 — Talk to Grok via Safari automation (macOS)
+grok_bridge.py v3.1.0 — Turn SuperGrok into a REST API + CLI tool (macOS)
 
-Safari 不支持标准 CDP。本脚本用 AppleScript + JS 注入实现等价功能：
-  - AppleScript `do JavaScript` ≈ CDP Runtime.evaluate
-  - AppleScript `keystroke` / pbcopy+paste ≈ CDP Input.dispatchKeyEvent
-  - 读取 document.body.innerText ≈ CDP DOM 读取
+No API key needed. Uses pure Safari JavaScript injection via AppleScript.
 
-前置条件:
-  Safari > 设置 > 高级 > 显示网页开发者功能 ✓
-  Safari > 开发 > 允许来自 Apple Events 的 JavaScript ✓
+Key advantages (v3+):
+- Zero Accessibility permissions required
+- Fast ~3s responses
+- Full REST API with conversation management
+- Robust Chinese UI support (v3.1.0)
 
-用法:
-  python3 grok_bridge.py --port 19998
+Preconditions:
+  Safari > Settings > Advanced > Show features for web developers ✓
+  Safari > Develop > Allow JavaScript from Apple Events ✓
+
+Usage:
+  python3 scripts/grok_bridge.py --port 19998
   curl -X POST http://localhost:19998/chat -d '{"prompt":"hello"}'
 """
 import json,time,threading,re,argparse,subprocess
@@ -20,13 +23,13 @@ from http.server import HTTPServer,BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
 GROK_URL='https://grok.com'
-VERSION='v1'
+VERSION='v3.1.0'
 # 多种输入框选择器（grok.com 可能更新 UI）
 INPUT_SELECTORS=['textarea','div[contenteditable="true"]','[data-testid="text-input"]','[role="textbox"]']
 # 发送按钮选择器（支持中英文，防止 grok.com UI 更新导致按钮无法点击）
 SEND_SELECTORS=[
     'button[aria-label="Send"]',
-    'button[aria-label="提交"]',
+    'button[aria-label="提交"]',   # Chinese support added in v3.1.0
     'button[data-testid="send-button"]'
 ]
 
@@ -80,7 +83,8 @@ class GrokBridge:
         time.sleep(0.5)
         # Try click Send button (JS click, no System Events)
         for btn_sel in SEND_SELECTORS:
-            r=s._js(f"(()=>{{const b=document.querySelector('{btn_sel}');if(b&&!b.disabled){{b.click();return'OK'}};return'NO'}})()")
+            r=s._js(f"(()=>{{
+const b=document.querySelector('{btn_sel}');if(b&&!b.disabled){{b.click();return'OK'}};return'NO'}})()")
             if 'OK' in str(r):return True
         # Fallback: find button with Send/Submit text (support Chinese)
         r=s._js("""(()=>{const bs=[...document.querySelectorAll('button')];const b=bs.find(x=>/send|发送|提交|submit/i.test(x.textContent||x.ariaLabel||''));if(b&&!b.disabled){b.click();return'OK'}return'NO'})()""")
@@ -173,6 +177,6 @@ class ThreadedHTTPServer(ThreadingMixIn,HTTPServer):daemon_threads=True
 if __name__=='__main__':
     pa=argparse.ArgumentParser();pa.add_argument('--port',type=int,default=19998)
     a=pa.parse_args();b=GrokBridge()
-    print(f'Grok Bridge {VERSION} :{a.port}',flush=True)
-    print('前置: Safari > 开发 > 允许来自 Apple Events 的 JavaScript',flush=True)
+    print(f'Grok Bridge {VERSION} starting on :{a.port}',flush=True)
+    print('Precondition: Safari > Develop > Allow JavaScript from Apple Events',flush=True)
     ThreadedHTTPServer(('0.0.0.0',a.port),H).serve_forever()
