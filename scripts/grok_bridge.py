@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """
-grok_bridge.py v3.0 — Talk to Grok via Safari automation (macOS)
+grok_bridge.py v3.1.1 — Turn Grok in Safari into a local REST API (macOS)
 
-Safari 不支持标准 CDP。本脚本用 AppleScript + JS 注入实现等价功能：
-  - AppleScript `do JavaScript` ≈ CDP Runtime.evaluate
-  - AppleScript `keystroke` / pbcopy+paste ≈ CDP Input.dispatchKeyEvent
-  - 读取 document.body.innerText ≈ CDP DOM 读取
+No API key needed. Uses pure Safari JavaScript injection via AppleScript.
 
-前置条件:
-  Safari > 设置 > 高级 > 显示网页开发者功能 ✓
-  Safari > 开发 > 允许来自 Apple Events 的 JavaScript ✓
+Key advantages (v3.1.1):
+- Zero Accessibility permissions required
+- Local loopback REST API for personal automation
+- Dedicated background Safari tab by default
+- Robust Chinese/English send-button support
+- Cleaner assistant-message extraction for agent use
 
-用法:
-  python3 grok_bridge.py --port 19998
-  curl -X POST http://localhost:19998/chat -d '{"prompt":"hello"}'
+Preconditions:
+  Safari > Settings > Advanced > Show features for web developers ✓
+  Safari > Develop > Allow JavaScript from Apple Events ✓
+
+Usage:
+  python3 scripts/grok_bridge.py --doctor
+  python3 scripts/grok_bridge.py --bind 127.0.0.1 --port 19998
+  curl -X POST http://127.0.0.1:19998/chat -d '{"prompt":"hello"}'
 """
 import json,time,threading,re,argparse,subprocess,shutil,sys
 from http.server import HTTPServer,BaseHTTPRequestHandler
@@ -21,7 +26,7 @@ from socketserver import ThreadingMixIn
 from urllib.parse import urlsplit
 
 GROK_URL='https://grok.com'
-VERSION='v3.0'
+VERSION='v3.1.1'
 BRIDGE_TAB_NAME='grok-bridge-agent'
 PREREQ_HINTS=[
     'Run this on macOS with Safari installed.',
@@ -43,6 +48,7 @@ INPUT_SELECTORS=[
 SEND_SELECTORS=[
     'button[aria-label="Send"]',
     'button[aria-label="Submit"]',
+    'button[aria-label="发送"]',
     'button[aria-label="提交"]',
     'button[data-testid="send-button"]',
     'button[type="submit"]'

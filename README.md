@@ -1,6 +1,8 @@
-# 🌉 grok-bridge v3.0
+# 🌉 grok-bridge v3.1.1
 
 Turn **SuperGrok** into a REST API + CLI tool. No API key needed.
+
+`v3.1.1` is the publishable release candidate that supersedes the `v3.1.0` release-candidate attempt. It keeps the stable v3 loopback/dedicated-tab boundary and highlights the grok.com Chinese UI submit-button fix.
 
 ## How it works
 
@@ -104,13 +106,15 @@ Notes:
 
 ## Version History
 
-| | v1 | v2 | v3 |
+| | v1 | v2 | v3.1.1 |
 |---|---|---|---|
 | Input | Peekaboo UI | pbcopy + Cmd+V | JS `execCommand('insertText')` |
-| Submit | UI click | System Events Return | JS `button.click()` |
+| Submit | UI click | System Events Return | JS visible button click / Enter fallback |
+| UI support | English button labels | English button labels | English + Chinese send labels (`Send`, `Submit`, `发送`, `提交`) |
 | Permissions | Peekaboo + Accessibility | Accessibility | **None by default** (pure JS injection) |
-| Interface | CLI only | CLI only | **REST API** + CLI |
+| Interface | CLI only | CLI only | **REST API** + legacy CLI |
 | Dependencies | Peekaboo (brew) | None | None (stdlib only) |
+| Network boundary | N/A | SSH/manual | `127.0.0.1` by default; remote via tunnel/proxy |
 | Speed | ~30s | ~3s | ~3s |
 
 ## Architecture

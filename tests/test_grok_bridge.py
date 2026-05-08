@@ -25,6 +25,9 @@ class FakeBridge:
 
 
 class DoctorTests(unittest.TestCase):
+    def test_release_version_is_publishable_patch(self):
+        self.assertEqual(grok_bridge.VERSION, 'v3.1.1')
+
     def test_redact_url_removes_path_query_and_fragment(self):
         redacted = grok_bridge.redact_url('https://grok.com/chat/private-id?q=private#frag')
 
@@ -82,6 +85,14 @@ class DoctorTests(unittest.TestCase):
         self.assertTrue(args.shared_tab)
         self.assertTrue(args.foreground_fallback)
         self.assertEqual(args.tab_name, 'test-tab')
+
+    def test_send_selectors_cover_chinese_and_english_ui(self):
+        selectors = set(grok_bridge.SEND_SELECTORS)
+
+        self.assertIn('button[aria-label="Send"]', selectors)
+        self.assertIn('button[aria-label="Submit"]', selectors)
+        self.assertIn('button[aria-label="发送"]', selectors)
+        self.assertIn('button[aria-label="提交"]', selectors)
 
 
 class ExtractResponseTests(unittest.TestCase):

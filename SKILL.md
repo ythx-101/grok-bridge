@@ -1,11 +1,13 @@
-# grok-bridge v3.0
+# grok-bridge v3.1.1
 
 Talk to Grok via Safari automation — CLI tool + REST API.
+
+`v3.1.1` 是当前可发布版本：保留本机 loopback + 后台专用 tab 的稳定边界，并包含 grok.com 中文提交按钮支持。
 
 ## 架构
 - Safari AppleScript `do JavaScript` = CDP Runtime.evaluate
 - `document.execCommand('insertText')` = 输入（绕过 React 受控组件）
-- JS `button.click()` = 提交（不依赖 System Events 权限）
+- JS `button.click()` = 提交（支持 `Send` / `Submit` / `发送` / `提交`，不依赖 System Events 权限）
 - 默认使用 `window.name="grok-bridge-agent"` 标记的 Safari 后台专用 tab；`--shared-tab` 仅用于手动调试当前 tab。
 - **默认不需要辅助功能权限**；只有显式 `--foreground-fallback` 才允许激活 Safari 并用 System Events Enter。
 
@@ -81,7 +83,7 @@ ps -p <PID> -o pid=,ppid=,lstart=,command=
 3. Safari 已登录 grok.com（SuperGrok 推荐）
 
 ## 文件
-- `scripts/grok_bridge.py` — REST API 服务（v3.0, stdlib only）
+- `scripts/grok_bridge.py` — REST API 服务（v3.1.1, stdlib only）
 - `scripts/grok_chat.sh` — CLI 工具（v3, bash + CGEvent）
 
 ## 设计决策（AG Opus 的判断）
